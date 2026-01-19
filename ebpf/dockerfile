@@ -1,0 +1,53 @@
+FROM ubuntu:22.04
+
+# Enable universe repo
+RUN apt-get update && apt-get install -y software-properties-common && add-apt-repository universe && apt-get update
+
+# Install build dependencies (excluding libbpf*)
+RUN apt-get install -y \
+    clang \
+    llvm \
+    git \
+    make \
+    gcc \
+    libelf-dev \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    build-essential \
+    pkg-config \
+    zlib1g-dev \
+    flex \
+    bison \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build libbpf from source
+RUN git clone --depth=1 https://github.com/libbpf/libbpf.git && \
+    cd libbpf/src && \
+    make && \
+    make install && \
+    cd ../.. && rm -rf libbpf && \
+    ldconfig
+
+# Build bpftool from source
+RUN git clone --depth=1 https://github.com/torvalds/linux.git && \
+    cd linux/tools/bpf/bpftool && \
+    make && \
+    cp bpftool /usr/local/bin/ && \
+    cd ../../../.. && rm -rf linux
+
+# Set working directory
+WORKDIR /app
+
+# Copy source files
+COPY . .
+
+# Build your application
+RUN make
+
+RUN echo "/usr/lib64" > /etc/ld.so.conf.d/lib64.conf && ldconfig
+ENV LD_LIBRARY_PATH=/usr/lib64
+
+# Run
+ENTRYPOINT ["./xdp_dns_user_space"]
+CMD ["eth0"]
