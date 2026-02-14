@@ -13,19 +13,7 @@
 #define ntohs(x) __builtin_bswap16(x)
 #define htons(x) __builtin_bswap16(x)
 
-struct dns_event {
-    __u32 src_ip;
-    __u32 dest_ip;
-    __u16 src_port;
-    __u16 dest_port;
-    __u16 query_length;     // Length of DNS query
-    __u16 payload_size;     // Total DNS payload size
-    __u8 query_type;        // Type of DNS query (A, TXT, etc.)
-    __u8 subdomain_count;   // Number of subdomains in query
-    __u64 timestamp;        // Timestamp for frequency analysis
-    __u32 frequency;        // Renamed from packet_count to be more clear
-    __u32 if_index;
-};
+#include "common_defines.h"
 
 // Modern map definitions
 struct {
@@ -109,16 +97,36 @@ int packet_filter(struct xdp_md *ctx) {
     event->dest_ip = ip->daddr;
     event->src_port = src_port;
     event->dest_port = dest_port;
+    event->if_index = ctx->ingress_ifindex;
+    event->direction = (src_port == 53) ? 1 : 0;
 
     // Get current timestamp
     __u64 current_ts = bpf_ktime_get_ns();
     event->timestamp = current_ts;
 
-    // Calculate payload length
+    // Calculate payload length and copy payload
     __u16 udp_len = ntohs(udp->len);
     if (udp_len > sizeof(*udp)) {
-        event->query_length = udp_len - sizeof(*udp);
-        event->payload_size = event->query_length;
+        __u16 payload_len = udp_len - sizeof(*udp);
+        event->payload_size = payload_len;
+        
+        // Cap payload length at MAX_DNS_PAYLOAD
+        if (payload_len > MAX_DNS_PAYLOAD) {
+            payload_len = MAX_DNS_PAYLOAD;
+        }
+        event->query_length = payload_len; // Reusing this field for captured length
+
+        // Copy payload to event
+        void *payload_start = (void *)(udp + 1);
+        if (payload_start + payload_len <= data_end) {
+            // Simple bounded loop without pragma, relying on constant bound
+            for (__u32 i = 0; i < MAX_DNS_PAYLOAD; i++) {
+                if (i >= payload_len) break;
+                // Explicit check for verifier safety
+                if ((void *)payload_start + i + 1 > data_end) break;
+                event->payload[i] = ((unsigned char *)payload_start)[i];
+            }
+        }
     }
 
     // Update frequency tracking
@@ -139,7 +147,7 @@ int packet_filter(struct xdp_md *ctx) {
     bpf_map_update_elem(&ip_timestamp, &ip->saddr, &current_ts, BPF_ANY);
 
     // Set frequency in event
-    event->frequency = new_freq;  // Just store the frequency, no direction flag
+    event->frequency = new_freq;
 
     bpf_ringbuf_submit(event, 0);
     return XDP_PASS;

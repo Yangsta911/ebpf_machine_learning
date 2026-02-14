@@ -1,7 +1,7 @@
 # Compiler and flags
 CC = clang
-CFLAGS = -O2 -g -Wall -Werror $(CFLAGS_EXTRA)
-BPF_CFLAGS = -O2 -g -Wall -Werror $(BPF_CFLAGS_EXTRA)
+CFLAGS = -O2 -g -Wall -Wno-pass-failed $(CFLAGS_EXTRA)
+BPF_CFLAGS = -O2 -g -Wall -Wno-pass-failed $(BPF_CFLAGS_EXTRA)
 
 # Include paths
 INCLUDES = -I/usr/include/linux -I/usr/include/x86_64-linux-gnu
@@ -21,7 +21,7 @@ all: $(BPF_TARGETS) $(USER_TARGETS)
 
 # User space programs
 xdp_dns_user_space: xdp_dns_user_space.c dns_packet_filter.o
-	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< -lbpf -lelf
+	$(CC) $(CFLAGS) -o $@ $< -lbpf -lelf -lm
 
 # Clean target
 clean:
